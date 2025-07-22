@@ -1,5 +1,6 @@
 package com.tencent.mm.plugin
 
+import android.app.ActivityManager
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapShader
@@ -25,11 +26,26 @@ class MainHook : IXposedHookLoadPackage {
                 object : XC_MethodHook() {
                     override fun afterHookedMethod(param: MethodHookParam) {
                         val context = param.args[0] as Context
-                        wechatHook(context.classLoader)
+                        val processName = getProcessName(context)
+
+                        // 只在主进程 Hook
+                        if (processName == context.packageName) {
+                            wechatHook(context.classLoader)
+                        }
                     }
                 }
             )
-            wechatHook(lpparam.classLoader)
+        }
+    }
+
+    fun getProcessName(context: Context): String {
+        return try {
+            val pid = android.os.Process.myPid()
+            val activityManager =
+                context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+            activityManager.runningAppProcesses?.firstOrNull { it.pid == pid }?.processName ?: ""
+        } catch (_: Exception) {
+            ""
         }
     }
 
@@ -50,22 +66,21 @@ class MainHook : IXposedHookLoadPackage {
             })
     }
 
-    private val sharedPaint = Paint(Paint.ANTI_ALIAS_FLAG)
-    private val sharedRectF = RectF()
-
     fun createRoundedBitmap(bitmap: Bitmap, cornerRatio: Float): Bitmap {
         val width = bitmap.width
         val height = bitmap.height
-        val cornerRadius = width.coerceAtMost(height) * cornerRatio
+        val safeCornerRatio = cornerRatio.coerceIn(0f, 1f)
+        val cornerRadius = width.coerceAtMost(height) * safeCornerRatio
 
-        sharedPaint.shader = BitmapShader(bitmap, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP)
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            shader = BitmapShader(bitmap, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP)
+        }
 
-        sharedRectF.set(0f, 0f, width.toFloat(), height.toFloat())
-
+        val rectF = RectF(0f, 0f, width.toFloat(), height.toFloat())
         val roundedBitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(roundedBitmap)
 
-        canvas.drawRoundRect(sharedRectF, cornerRadius, cornerRadius, sharedPaint)
+        canvas.drawRoundRect(rectF, cornerRadius, cornerRadius, paint)
 
         return roundedBitmap
     }
